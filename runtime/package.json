@@ -6,11 +6,15 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "microstack-runtime": "dist/cli.js"
+  },
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
     "clean": "if exist dist rmdir /s /q dist",
     "test": "vitest run",
     "test:watch": "vitest"
