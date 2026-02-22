@@ -4,6 +4,7 @@ import { HttpError } from "./http-error.js";
 
 export interface MicrostackServerOptions {
   port?: number;
+  host?: string;
   dataDir?: string;
 }
 
@@ -90,6 +91,7 @@ function sendError(res: ServerResponse, error: unknown): void {
 }
 
 export async function createMicrostackServer(options: MicrostackServerOptions = {}): Promise<MicrostackServer> {
+  const host = options.host ?? "127.0.0.1";
   const lambdaBackend = createLambdaBackend(options.dataDir ? { dataDir: options.dataDir } : undefined);
   const handleLambdaRoute = createLambdaRouteHandler(lambdaBackend);
 
@@ -114,7 +116,7 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
   });
 
   await new Promise<void>((resolve) => {
-    server.listen(options.port ?? 0, "127.0.0.1", () => resolve());
+    server.listen(options.port ?? 0, host, () => resolve());
   });
 
   const address = server.address();
