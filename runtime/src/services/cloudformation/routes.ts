@@ -240,6 +240,24 @@ export function createCloudFormationRouteHandler(backend: CloudFormationBackend)
         return true;
       }
 
+      if (action === "UpdateStack") {
+        const stackName = requireString(params.get("StackName"), "StackName");
+        const templateBody = requireString(params.get("TemplateBody"), "TemplateBody");
+        const stack = await backend.updateStack({ stackName, templateBody });
+        sendXml(
+          res,
+          200,
+          `<?xml version="1.0" encoding="UTF-8"?>
+<UpdateStackResponse xmlns="http://cloudformation.amazonaws.com/doc/2010-05-15/">
+  <UpdateStackResult>
+    <StackId>${xmlEscape(stack.stackId)}</StackId>
+  </UpdateStackResult>
+  ${responseMetadataXml()}
+</UpdateStackResponse>`,
+        );
+        return true;
+      }
+
       throw new CloudFormationRouteError("InvalidAction", `Unknown action ${action}`);
     } catch (error) {
       if (error instanceof CloudFormationRouteError) {

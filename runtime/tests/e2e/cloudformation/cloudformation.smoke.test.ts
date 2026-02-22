@@ -1,8 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CloudFormationClient, CreateStackCommand, DeleteStackCommand, DescribeStacksCommand } from "@aws-sdk/client-cloudformation";
+import {
+  CloudFormationClient,
+  CreateStackCommand,
+  DeleteStackCommand,
+  DescribeStacksCommand,
+  UpdateStackCommand,
+} from "@aws-sdk/client-cloudformation";
 import { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
+import { DeleteFunctionCommand, InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { createMicrostackServer, type MicrostackServer } from "../../../src/index.js";
 
 function createClientConfig(endpoint: string) {
@@ -14,6 +20,14 @@ function createClientConfig(endpoint: string) {
       secretAccessKey: "test",
     },
   };
+}
+
+function decodePayload(payload?: Uint8Array): unknown {
+  if (!payload) {
+    return undefined;
+  }
+  const raw = Buffer.from(payload).toString("utf8");
+  return raw.length > 0 ? JSON.parse(raw) : undefined;
 }
 
 describe("cloudformation e2e smoke", () => {
@@ -132,6 +146,64 @@ describe("cloudformation e2e smoke", () => {
     await cfn.send(new DeleteStackCommand({ StackName: "e2e-cfn-s3-stack" }));
 
     const deleted = await cfn.send(new DescribeStacksCommand({ StackName: "e2e-cfn-s3-stack" }));
+    expect(deleted.Stacks?.[0]?.StackStatus).toBe("DELETE_COMPLETE");
+  });
+
+  it("updates cfn stack lambda code and delete is idempotent when function missing", async () => {
+    await cfn.send(
+      new CreateStackCommand({
+        StackName: "e2e-cfn-update-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Fn: {
+              Type: "AWS::Lambda::Function",
+              Properties: {
+                FunctionName: "e2e-cfn-update-fn",
+                Runtime: "nodejs20.x",
+                Role: "arn:aws:iam::000000000000:role/lambda-role",
+                Handler: "index.handler",
+                Code: {
+                  ZipFile: "export async function handler(){return {version:1};}",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const firstInvoke = await lambda.send(new InvokeCommand({ FunctionName: "e2e-cfn-update-fn" }));
+    expect(decodePayload(firstInvoke.Payload)).toEqual({ version: 1 });
+
+    await cfn.send(
+      new UpdateStackCommand({
+        StackName: "e2e-cfn-update-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Fn: {
+              Type: "AWS::Lambda::Function",
+              Properties: {
+                FunctionName: "e2e-cfn-update-fn",
+                Runtime: "nodejs20.x",
+                Role: "arn:aws:iam::000000000000:role/lambda-role",
+                Handler: "index.handler",
+                Code: {
+                  ZipFile: "export async function handler(){return {version:2};}",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const secondInvoke = await lambda.send(new InvokeCommand({ FunctionName: "e2e-cfn-update-fn" }));
+    expect(decodePayload(secondInvoke.Payload)).toEqual({ version: 2 });
+
+    await lambda.send(new DeleteFunctionCommand({ FunctionName: "e2e-cfn-update-fn" }));
+    await cfn.send(new DeleteStackCommand({ StackName: "e2e-cfn-update-stack" }));
+
+    const deleted = await cfn.send(new DescribeStacksCommand({ StackName: "e2e-cfn-update-stack" }));
     expect(deleted.Stacks?.[0]?.StackStatus).toBe("DELETE_COMPLETE");
   });
 });

@@ -6,6 +6,12 @@ export type CloudFormationStackStatus =
   | "CREATE_IN_PROGRESS"
   | "CREATE_COMPLETE"
   | "CREATE_FAILED"
+  | "UPDATE_IN_PROGRESS"
+  | "UPDATE_COMPLETE"
+  | "UPDATE_FAILED"
+  | "UPDATE_ROLLBACK_IN_PROGRESS"
+  | "UPDATE_ROLLBACK_COMPLETE"
+  | "UPDATE_ROLLBACK_FAILED"
   | "DELETE_IN_PROGRESS"
   | "DELETE_COMPLETE"
   | "DELETE_FAILED";
@@ -14,11 +20,21 @@ export type CloudFormationResourceStatus =
   | "CREATE_IN_PROGRESS"
   | "CREATE_COMPLETE"
   | "CREATE_FAILED"
+  | "UPDATE_IN_PROGRESS"
+  | "UPDATE_COMPLETE"
+  | "UPDATE_FAILED"
+  | "UPDATE_ROLLBACK_IN_PROGRESS"
+  | "UPDATE_ROLLBACK_COMPLETE"
+  | "UPDATE_ROLLBACK_FAILED"
   | "DELETE_IN_PROGRESS"
   | "DELETE_COMPLETE"
   | "DELETE_FAILED";
 
 export type CreateStackInput = {
+  stackName: string;
+  templateBody: string;
+};
+export type UpdateStackInput = {
   stackName: string;
   templateBody: string;
 };
@@ -64,6 +80,7 @@ export type CloudFormationBackendDependencies = {
 
 export interface CloudFormationBackend {
   createStack(input: CreateStackInput): Promise<CreateStackOutput>;
+  updateStack(input: UpdateStackInput): Promise<StackSummary>;
   describeStacks(stackName?: string): StackSummary[];
   describeStackResources(stackName: string): StackResourceSummary[];
   describeStackEvents(stackName: string): StackEvent[];
