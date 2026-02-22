@@ -44,6 +44,16 @@ export type InvokeResult = {
   functionError?: string;
 };
 
+export type InvocationLogRecord = {
+  functionName: string;
+  requestId: string;
+  timestamp: number;
+  payload: Uint8Array;
+  functionError?: string;
+};
+
+export type InvocationLogger = (record: InvocationLogRecord) => void | Promise<void>;
+
 export interface LambdaBackend {
   createFunction(input: CreateFunctionInput): FunctionConfig;
   getFunction(name: string): FunctionConfig;

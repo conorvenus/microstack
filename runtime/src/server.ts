@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createCloudWatchLogsBackend, createCloudWatchLogsRouteHandler } from "./services/cloudwatch-logs/index.js";
 import { createLambdaBackend, createLambdaRouteHandler } from "./services/lambda/index.js";
 import { createMicrostackRouteHandler } from "./services/microstack/index.js";
 import { HttpError } from "./http-error.js";
@@ -102,9 +103,28 @@ function sendError(res: ServerResponse, error: unknown): void {
 
 export async function createMicrostackServer(options: MicrostackServerOptions = {}): Promise<MicrostackServer> {
   const host = options.host ?? "127.0.0.1";
-  const lambdaBackend = createLambdaBackend(options.dataDir ? { dataDir: options.dataDir } : undefined);
+  const cloudWatchLogsBackend = createCloudWatchLogsBackend();
+  const lambdaBackend = createLambdaBackend({
+    ...(options.dataDir ? { dataDir: options.dataDir } : {}),
+    invocationLogger: (record) => {
+      const logGroupName = `/aws/lambda/${record.functionName}`;
+      const date = new Date(record.timestamp).toISOString().slice(0, 10).split("-").join("/");
+      const logStreamName = `${date}/[$LATEST]${record.requestId}`;
+      const payloadText = Buffer.from(record.payload).toString("utf8");
+
+      cloudWatchLogsBackend.putLogEvent(logGroupName, logStreamName, `START RequestId: ${record.requestId}`, record.timestamp);
+      cloudWatchLogsBackend.putLogEvent(
+        logGroupName,
+        logStreamName,
+        record.functionError ? `ERROR ${payloadText}` : `RESULT ${payloadText}`,
+        record.timestamp + 1,
+      );
+      cloudWatchLogsBackend.putLogEvent(logGroupName, logStreamName, `END RequestId: ${record.requestId}`, record.timestamp + 2);
+    },
+  });
   const handleMicrostackRoute = createMicrostackRouteHandler();
   const handleLambdaRoute = createLambdaRouteHandler(lambdaBackend);
+  const handleCloudWatchLogsRoute = createCloudWatchLogsRouteHandler(cloudWatchLogsBackend);
 
   const server: Server = createServer(async (req, res) => {
     try {
@@ -127,6 +147,10 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
       }
 
       if (await handleLambdaRoute(req, res, pathname, method)) {
+        return;
+      }
+
+      if (await handleCloudWatchLogsRoute(req, res, pathname, method)) {
         return;
       }
 

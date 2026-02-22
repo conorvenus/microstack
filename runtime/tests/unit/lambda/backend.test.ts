@@ -133,4 +133,58 @@ describe("lambda backend", () => {
 
     expect(() => backend.getFunction("missing")).toThrowError(HttpError);
   });
+
+  it("emits invocation log records for success and failures", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "microstack-lambda-backend-"));
+    tempDirs.push(dataDir);
+    const records: Array<{ functionName: string; functionError?: string; payload: unknown }> = [];
+    const backend = createLambdaBackend({
+      dataDir,
+      invocationLogger: (record) => {
+        records.push({
+          functionName: record.functionName,
+          ...(record.functionError ? { functionError: record.functionError } : {}),
+          payload: decodePayload(record.payload),
+        });
+      },
+    });
+
+    backend.createFunction({
+      FunctionName: "logs-success-fn",
+      Runtime: "nodejs20.x",
+      Role: "arn:aws:iam::000000000000:role/lambda-role",
+      Handler: "index.handler",
+      Code: {
+        ZipFile: Buffer.from(createFunctionZip("export async function handler() { return { ok: true }; }")).toString(
+          "base64",
+        ),
+      },
+    });
+
+    backend.createFunction({
+      FunctionName: "logs-error-fn",
+      Runtime: "nodejs20.x",
+      Role: "arn:aws:iam::000000000000:role/lambda-role",
+      Handler: "index.handler",
+      Code: {
+        ZipFile: Buffer.from(
+          createFunctionZip("export async function handler() { throw new Error('boom-for-log'); }"),
+        ).toString("base64"),
+      },
+    });
+
+    await backend.invokeFunction("logs-success-fn", Buffer.alloc(0));
+    await backend.invokeFunction("logs-error-fn", Buffer.alloc(0));
+
+    expect(records).toHaveLength(2);
+    expect(records[0]).toEqual({
+      functionName: "logs-success-fn",
+      payload: { ok: true },
+    });
+    expect(records[1]).toEqual({
+      functionName: "logs-error-fn",
+      functionError: "Unhandled",
+      payload: { errorType: "Error", errorMessage: "boom-for-log" },
+    });
+  });
 });

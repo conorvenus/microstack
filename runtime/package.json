@@ -26,6 +26,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.995.0",
     "@aws-sdk/client-lambda": "^3.995.0",
     "adm-zip": "^0.5.16"
   }

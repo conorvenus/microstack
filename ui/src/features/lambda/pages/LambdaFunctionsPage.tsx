@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactElement } from "react";
+import { Link } from "react-router-dom";
 
 import { AppBreadcrumbs } from "@/components/navigation/AppBreadcrumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,7 +60,7 @@ export function LambdaFunctionsPage(): ReactElement {
                           Runtime URL is invalid. Set a valid URL on the Dashboard page.
                         </td>
                       </tr>
-                    ) : lambdaFunctionsQuery.isLoading ? (
+                    ) : lambdaFunctionsQuery.isLoading || !lambdaFunctionsQuery.data ? (
                       <tr>
                         <td colSpan={3} className="px-4 py-6 text-slate-400">
                           Loading Lambda functions...
@@ -80,7 +81,14 @@ export function LambdaFunctionsPage(): ReactElement {
                     ) : (
                       lambdaFunctionsQuery.data.Functions.map((fn) => (
                         <tr key={fn.FunctionName}>
-                          <td className="px-4 py-3">{fn.FunctionName}</td>
+                          <td className="px-4 py-3">
+                            <Link
+                              to={`/lambda/${encodeURIComponent(fn.FunctionName)}`}
+                              className="text-sky-300 transition-colors hover:text-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+                            >
+                              {fn.FunctionName}
+                            </Link>
+                          </td>
                           <td className="px-4 py-3">{fn.Runtime}</td>
                           <td className="px-4 py-3">{formatLastModified(fn.LastModified)}</td>
                         </tr>

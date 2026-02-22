@@ -6,6 +6,11 @@ import {
   LambdaClient,
   UpdateFunctionCodeCommand,
 } from "@aws-sdk/client-lambda";
+import {
+  CloudWatchLogsClient,
+  DescribeLogStreamsCommand,
+  GetLogEventsCommand,
+} from "@aws-sdk/client-cloudwatch-logs";
 import AdmZip from "adm-zip";
 import { createMicrostackServer, type MicrostackServer } from "../../../src/index.js";
 
@@ -25,6 +30,7 @@ function decodePayload(payload?: Uint8Array): unknown {
 describe("lambda e2e smoke", () => {
   let server: MicrostackServer;
   let client: LambdaClient;
+  let logsClient: CloudWatchLogsClient;
 
   beforeAll(async () => {
     server = await createMicrostackServer({ port: 0 });
@@ -36,10 +42,19 @@ describe("lambda e2e smoke", () => {
         secretAccessKey: "test",
       },
     });
+    logsClient = new CloudWatchLogsClient({
+      endpoint: server.endpoint,
+      region: "us-east-1",
+      credentials: {
+        accessKeyId: "test",
+        secretAccessKey: "test",
+      },
+    });
   });
 
   afterAll(async () => {
     client.destroy();
+    logsClient.destroy();
     await server.close();
   });
 
@@ -70,5 +85,43 @@ describe("lambda e2e smoke", () => {
     expect(decodePayload(secondInvoke.Payload)).toEqual({ version: 2 });
 
     await client.send(new DeleteFunctionCommand({ FunctionName: "smoke-fn" }));
+  });
+
+  it("cross-service: lambda invocation output is queryable from cloudwatch logs", async () => {
+    await client.send(
+      new CreateFunctionCommand({
+        FunctionName: "cross-service-fn",
+        Runtime: "nodejs20.x",
+        Role: "arn:aws:iam::000000000000:role/lambda-role",
+        Handler: "index.handler",
+        Code: {
+          ZipFile: createFunctionZip(`
+            export async function handler() {
+              throw new Error("cross-service-boom");
+            }
+          `),
+        },
+        Timeout: 2,
+      }),
+    );
+
+    const invocation = await client.send(new InvokeCommand({ FunctionName: "cross-service-fn" }));
+    expect(invocation.FunctionError).toBe("Unhandled");
+
+    const logGroupName = "/aws/lambda/cross-service-fn";
+    const streams = await logsClient.send(new DescribeLogStreamsCommand({ logGroupName }));
+    const streamName = streams.logStreams?.[0]?.logStreamName;
+    expect(streamName).toBeDefined();
+
+    const events = await logsClient.send(
+      new GetLogEventsCommand({
+        logGroupName,
+        logStreamName: streamName!,
+      }),
+    );
+    const messages = (events.events ?? []).map((event) => event.message ?? "");
+    expect(messages.some((message) => message.includes('"errorMessage":"cross-service-boom"'))).toBe(true);
+
+    await client.send(new DeleteFunctionCommand({ FunctionName: "cross-service-fn" }));
   });
 });

@@ -15,6 +15,25 @@ type ServiceGridProps = {
   scrollViewportRef: MutableRefObject<HTMLElement | null>;
 };
 
+const SERVICE_CARDS = [
+  {
+    title: "AWS Lambda",
+    description: "Function runtime emulation",
+    iconSrc: "/assets/aws/lambda.svg",
+    iconAlt: "AWS Lambda logo",
+    href: "/lambda",
+    ariaLabel: "Open Lambda functions page",
+  },
+  {
+    title: "Amazon CloudWatch Logs",
+    description: "Browse Lambda execution logs",
+    iconSrc: "/assets/aws/cloudwatch-logs.svg",
+    iconAlt: "Amazon CloudWatch Logs logo",
+    href: "/cloudwatch/logs",
+    ariaLabel: "Open CloudWatch Logs page",
+  },
+] as const;
+
 export function ServiceGrid({
   visibleRows,
   healthState,
@@ -44,7 +63,19 @@ export function ServiceGrid({
               viewport={{ once: true, amount: 0.2, root: scrollViewportRef }}
               transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: initialDelay }}
             >
-              {cardIndex === 0 ? <ServiceCard healthState={healthState} /> : <SkeletonServiceCard />}
+              {cardIndex < SERVICE_CARDS.length ? (
+                <ServiceCard
+                  title={SERVICE_CARDS[cardIndex].title}
+                  description={SERVICE_CARDS[cardIndex].description}
+                  iconSrc={SERVICE_CARDS[cardIndex].iconSrc}
+                  iconAlt={SERVICE_CARDS[cardIndex].iconAlt}
+                  href={SERVICE_CARDS[cardIndex].href}
+                  ariaLabel={SERVICE_CARDS[cardIndex].ariaLabel}
+                  healthState={healthState}
+                />
+              ) : (
+                <SkeletonServiceCard />
+              )}
             </motion.div>
           );
         })}

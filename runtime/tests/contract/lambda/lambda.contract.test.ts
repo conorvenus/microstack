@@ -11,6 +11,12 @@ import {
   UpdateFunctionCodeCommand,
   UpdateFunctionConfigurationCommand,
 } from "@aws-sdk/client-lambda";
+import {
+  CloudWatchLogsClient,
+  DescribeLogGroupsCommand,
+  DescribeLogStreamsCommand,
+  GetLogEventsCommand,
+} from "@aws-sdk/client-cloudwatch-logs";
 import AdmZip from "adm-zip";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,6 +41,7 @@ function decodePayload(payload?: Uint8Array): unknown {
 describe("Lambda contract (AWS SDK)", () => {
   let server: MicrostackServer;
   let client: LambdaClient;
+  let logsClient: CloudWatchLogsClient;
   let dataDir: string;
 
   beforeAll(async () => {
@@ -49,10 +56,19 @@ describe("Lambda contract (AWS SDK)", () => {
         secretAccessKey: "test",
       },
     });
+    logsClient = new CloudWatchLogsClient({
+      endpoint: server.endpoint,
+      region: "us-east-1",
+      credentials: {
+        accessKeyId: "test",
+        secretAccessKey: "test",
+      },
+    });
   });
 
   afterAll(async () => {
     client.destroy();
+    logsClient.destroy();
     await server.close();
     rmSync(dataDir, { recursive: true, force: true });
   });
@@ -225,5 +241,50 @@ describe("Lambda contract (AWS SDK)", () => {
     await expect(client.send(new InvokeCommand({ FunctionName: "does-not-exist" }))).rejects.toBeInstanceOf(
       ResourceNotFoundException,
     );
+  });
+
+  it("writes lambda invocation results to cloudwatch logs", async () => {
+    await client.send(
+      new CreateFunctionCommand({
+        FunctionName: "logs-fn",
+        Runtime: "nodejs20.x",
+        Role: "arn:aws:iam::000000000000:role/lambda-role",
+        Handler: "index.handler",
+        Code: {
+          ZipFile: createFunctionZip(`
+            export async function handler(event) {
+              return { echoed: event?.value ?? null };
+            }
+          `),
+        },
+        Timeout: 2,
+      }),
+    );
+
+    const invocation = await client.send(
+      new InvokeCommand({
+        FunctionName: "logs-fn",
+        Payload: Buffer.from(JSON.stringify({ value: "ok" })),
+      }),
+    );
+    expect(invocation.StatusCode).toBe(200);
+
+    const logGroupName = "/aws/lambda/logs-fn";
+    const groups = await logsClient.send(new DescribeLogGroupsCommand({ logGroupNamePrefix: logGroupName }));
+    expect((groups.logGroups ?? []).map((group) => group.logGroupName)).toContain(logGroupName);
+
+    const streams = await logsClient.send(new DescribeLogStreamsCommand({ logGroupName }));
+    expect((streams.logStreams ?? []).length).toBeGreaterThan(0);
+    const streamName = streams.logStreams?.[0]?.logStreamName;
+    expect(streamName).toBeDefined();
+
+    const events = await logsClient.send(
+      new GetLogEventsCommand({
+        logGroupName,
+        logStreamName: streamName!,
+      }),
+    );
+    const messages = (events.events ?? []).map((event) => event.message ?? "");
+    expect(messages.some((message) => message.includes('"echoed":"ok"'))).toBe(true);
   });
 });

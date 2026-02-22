@@ -7,10 +7,24 @@ import { Link } from "react-router-dom";
 import type { HealthState } from "../types";
 
 type ServiceCardProps = {
+  title: string;
+  description: string;
+  iconSrc: string;
+  iconAlt: string;
+  href: string;
+  ariaLabel: string;
   healthState: HealthState;
 };
 
-export function ServiceCard({ healthState }: ServiceCardProps): ReactElement {
+export function ServiceCard({
+  title,
+  description,
+  iconSrc,
+  iconAlt,
+  href,
+  ariaLabel,
+  healthState,
+}: ServiceCardProps): ReactElement {
   const availabilityLabel =
     healthState === "invalid" ? "Disabled" : healthState === "healthy" ? "Available" : "Unavailable";
   const availabilityClassName =
@@ -22,8 +36,8 @@ export function ServiceCard({ healthState }: ServiceCardProps): ReactElement {
 
   return (
     <Link
-      to="/lambda"
-      aria-label="Open Lambda functions page"
+      to={href}
+      aria-label={ariaLabel}
       className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
     >
       <Card
@@ -34,10 +48,10 @@ export function ServiceCard({ healthState }: ServiceCardProps): ReactElement {
       >
         <CardHeader className="pb-4">
           <div className="mb-3 h-12 w-12 rounded-lg bg-slate-950/70 p-2">
-            <img src="/assets/aws/lambda.svg" alt="AWS Lambda logo" className="h-full w-full object-contain" />
+            <img src={iconSrc} alt={iconAlt} className="h-full w-full object-contain" />
           </div>
-          <CardTitle className="text-base text-slate-100">AWS Lambda</CardTitle>
-          <CardDescription>Function runtime emulation</CardDescription>
+          <CardTitle className="text-base text-slate-100">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent className="mt-auto">
           <Badge className={availabilityClassName}>{availabilityLabel}</Badge>

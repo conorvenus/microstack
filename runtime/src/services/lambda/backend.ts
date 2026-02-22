@@ -8,6 +8,7 @@ import { HttpError } from "../../http-error.js";
 import type {
   CreateFunctionInput,
   FunctionConfig,
+  InvocationLogger,
   InvokeResult,
   LambdaBackend,
   UpdateFunctionCodeInput,
@@ -24,9 +25,12 @@ class TimeoutError extends Error {
 class InMemoryLambdaBackend implements LambdaBackend {
   private readonly functions = new Map<string, FunctionConfig>();
   private readonly runtimeRoot: string;
+  private readonly invocationLogger: InvocationLogger | undefined;
 
-  public constructor(baseDir?: string) {
+  public constructor(options: { baseDir?: string; invocationLogger?: InvocationLogger } = {}) {
+    const { baseDir, invocationLogger } = options;
     this.runtimeRoot = this.createRuntimeRoot(baseDir ?? join(tmpdir(), "microstack"));
+    this.invocationLogger = invocationLogger;
   }
 
   public createFunction(input: CreateFunctionInput): FunctionConfig {
@@ -128,6 +132,8 @@ class InMemoryLambdaBackend implements LambdaBackend {
     const invocationDir = mkdtempSync(join(this.runtimeRoot, `${fn.functionName}-${fn.version}-`));
     const zip = new AdmZip(Buffer.from(fn.zipFile));
     zip.extractAllTo(invocationDir, true);
+    const requestId = randomUUID();
+    const timestamp = Date.now();
 
     const handlerPath = this.resolveHandlerFile(invocationDir, moduleName);
     const importUrl = `${pathToFileURL(handlerPath).href}?v=${Date.now()}`;
@@ -147,25 +153,27 @@ class InMemoryLambdaBackend implements LambdaBackend {
       }
 
       const result = await this.withTimeout(
-        Promise.resolve(handler(event, { awsRequestId: randomUUID() })),
+        Promise.resolve(handler(event, { awsRequestId: requestId })),
         fn.timeout * 1000,
         fn.timeout,
       );
-      return { payload: Buffer.from(JSON.stringify(result ?? null), "utf8") };
+      return await this.logInvocationResult(fn.functionName, requestId, timestamp, {
+        payload: Buffer.from(JSON.stringify(result ?? null), "utf8"),
+      });
     } catch (error) {
       if (error instanceof HttpError) {
         throw error;
       }
 
       if (error instanceof TimeoutError) {
-        return {
+        return await this.logInvocationResult(fn.functionName, requestId, timestamp, {
           functionError: "Unhandled",
           payload: Buffer.from(JSON.stringify({ errorType: error.name, errorMessage: error.message }), "utf8"),
-        };
+        });
       }
 
       const err = error as Error;
-      return {
+      return await this.logInvocationResult(fn.functionName, requestId, timestamp, {
         functionError: "Unhandled",
         payload: Buffer.from(
           JSON.stringify({
@@ -174,7 +182,7 @@ class InMemoryLambdaBackend implements LambdaBackend {
           }),
           "utf8",
         ),
-      };
+      });
     } finally {
       for (const [key, value] of previousEnv) {
         if (value === undefined) {
@@ -185,6 +193,24 @@ class InMemoryLambdaBackend implements LambdaBackend {
       }
       rmSync(invocationDir, { recursive: true, force: true });
     }
+  }
+
+  private async logInvocationResult(
+    functionName: string,
+    requestId: string,
+    timestamp: number,
+    result: InvokeResult,
+  ): Promise<InvokeResult> {
+    if (this.invocationLogger) {
+      await this.invocationLogger({
+        functionName,
+        requestId,
+        timestamp,
+        payload: result.payload,
+        ...(result.functionError ? { functionError: result.functionError } : {}),
+      });
+    }
+    return result;
   }
 
   private createRuntimeRoot(baseDir: string): string {
@@ -229,6 +255,9 @@ class InMemoryLambdaBackend implements LambdaBackend {
   }
 }
 
-export function createLambdaBackend(options?: { dataDir?: string }): LambdaBackend {
-  return new InMemoryLambdaBackend(options?.dataDir);
+export function createLambdaBackend(options?: { dataDir?: string; invocationLogger?: InvocationLogger }): LambdaBackend {
+  return new InMemoryLambdaBackend({
+    ...(options?.dataDir ? { baseDir: options.dataDir } : {}),
+    ...(options?.invocationLogger ? { invocationLogger: options.invocationLogger } : {}),
+  });
 }
