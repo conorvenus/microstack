@@ -1,16 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: #111827;
-  background-color: #f3f4f6;
+  --background: 222 35% 8%;
+  --foreground: 210 40% 96%;
+  --card: 224 28% 10%;
+  --card-foreground: 210 40% 96%;
+  --muted: 222 18% 18%;
+  --muted-foreground: 215 18% 70%;
+  --border: 220 14% 24%;
+  --input: 220 14% 24%;
+  --primary: 196 90% 60%;
+  --primary-foreground: 220 40% 8%;
+  --ring: 196 90% 60%;
+  --radius: 0.8rem;
 }
 
 * {
-  box-sizing: border-box;
+  @apply border-border;
 }
 
 body {
+  @apply min-h-screen bg-background text-foreground antialiased;
   margin: 0;
-  min-height: 100vh;
+  overflow: hidden;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
 }

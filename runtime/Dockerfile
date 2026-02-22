@@ -22,6 +22,6 @@ COPY --from=build /app/dist ./dist
 
 EXPOSE 1337
 
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 CMD node -e "fetch('http://127.0.0.1:'+(process.env.MICROSTACK_PORT||'1337')+'/2015-03-31/functions').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=5 CMD node -e "fetch('http://127.0.0.1:'+(process.env.MICROSTACK_PORT||'1337')+'/microstack/health').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["node", "dist/cli.js"]

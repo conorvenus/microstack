@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createLambdaBackend, createLambdaRouteHandler } from "./services/lambda/index.js";
+import { createMicrostackRouteHandler } from "./services/microstack/index.js";
 import { HttpError } from "./http-error.js";
 
 export interface MicrostackServerOptions {
@@ -15,6 +16,13 @@ export interface MicrostackServer {
 
 export { HttpError };
 
+const CORS_HEADERS: Record<string, string> = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  "access-control-allow-headers":
+    "Content-Type,Authorization,X-Amz-Target,X-Amz-Security-Token,X-Amz-Date",
+};
+
 export function sendJson(
   res: ServerResponse,
   statusCode: number,
@@ -23,6 +31,7 @@ export function sendJson(
 ): void {
   const payload = Buffer.from(JSON.stringify(body), "utf8");
   res.writeHead(statusCode, {
+    ...CORS_HEADERS,
     "content-type": "application/json",
     "content-length": String(payload.byteLength),
     ...headers,
@@ -37,6 +46,7 @@ export function sendBinary(
   headers?: Record<string, string>,
 ): void {
   res.writeHead(statusCode, {
+    ...CORS_HEADERS,
     "content-type": "application/json",
     "content-length": String(payload.byteLength),
     ...headers,
@@ -93,6 +103,7 @@ function sendError(res: ServerResponse, error: unknown): void {
 export async function createMicrostackServer(options: MicrostackServerOptions = {}): Promise<MicrostackServer> {
   const host = options.host ?? "127.0.0.1";
   const lambdaBackend = createLambdaBackend(options.dataDir ? { dataDir: options.dataDir } : undefined);
+  const handleMicrostackRoute = createMicrostackRouteHandler();
   const handleLambdaRoute = createLambdaRouteHandler(lambdaBackend);
 
   const server: Server = createServer(async (req, res) => {
@@ -104,6 +115,16 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
       const url = new URL(req.url, "http://localhost");
       const pathname = url.pathname;
       const method = req.method.toUpperCase();
+
+      if (method === "OPTIONS") {
+        res.writeHead(204, CORS_HEADERS);
+        res.end();
+        return;
+      }
+
+      if (await handleMicrostackRoute(req, res, pathname, method)) {
+        return;
+      }
 
       if (await handleLambdaRoute(req, res, pathname, method)) {
         return;
