@@ -1,5 +1,6 @@
 import type { CloudWatchLogsBackend } from "../cloudwatch-logs/types.js";
 import type { LambdaBackend } from "../lambda/types.js";
+import type { S3Backend } from "../s3/types.js";
 
 export type CloudFormationStackStatus =
   | "CREATE_IN_PROGRESS"
@@ -58,6 +59,7 @@ export type CreateStackOutput = StackSummary;
 export type CloudFormationBackendDependencies = {
   lambdaBackend: LambdaBackend;
   cloudWatchLogsBackend: CloudWatchLogsBackend;
+  s3Backend: S3Backend;
 };
 
 export interface CloudFormationBackend {

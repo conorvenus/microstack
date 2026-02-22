@@ -10,6 +10,7 @@ import {
 } from "@aws-sdk/client-cloudformation";
 import { CloudWatchLogsClient, DescribeLogGroupsCommand } from "@aws-sdk/client-cloudwatch-logs";
 import { LambdaClient, GetFunctionCommand } from "@aws-sdk/client-lambda";
+import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import { createMicrostackServer, type MicrostackServer } from "../../../src/index.js";
 
 function createClientConfig(endpoint: string) {
@@ -28,18 +29,21 @@ describe("CloudFormation contract (AWS SDK)", () => {
   let cfn: CloudFormationClient;
   let lambda: LambdaClient;
   let logs: CloudWatchLogsClient;
+  let s3: S3Client;
 
   beforeAll(async () => {
     server = await createMicrostackServer({ port: 0 });
     cfn = new CloudFormationClient(createClientConfig(server.endpoint));
     lambda = new LambdaClient(createClientConfig(server.endpoint));
     logs = new CloudWatchLogsClient(createClientConfig(server.endpoint));
+    s3 = new S3Client({ ...createClientConfig(server.endpoint), forcePathStyle: true });
   });
 
   afterAll(async () => {
     cfn.destroy();
     lambda.destroy();
     logs.destroy();
+    s3.destroy();
     await server.close();
   });
 
@@ -110,16 +114,42 @@ describe("CloudFormation contract (AWS SDK)", () => {
     expect(deleted.Stacks?.[0]?.StackStatus).toBe("DELETE_COMPLETE");
   });
 
+  it("creates and exposes cloudformation-managed s3 bucket", async () => {
+    await cfn.send(
+      new CreateStackCommand({
+        StackName: "contract-cfn-s3-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Bucket: {
+              Type: "AWS::S3::Bucket",
+              Properties: {
+                BucketName: "contract-cfn-s3-bucket",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const resources = await cfn.send(new DescribeStackResourcesCommand({ StackName: "contract-cfn-s3-stack" }));
+    expect((resources.StackResources ?? []).map((item) => item.ResourceType)).toContain("AWS::S3::Bucket");
+
+    const headed = await s3.send(new HeadBucketCommand({ Bucket: "contract-cfn-s3-bucket" }));
+    expect(headed.$metadata.httpStatusCode).toBe(200);
+
+    await cfn.send(new DeleteStackCommand({ StackName: "contract-cfn-s3-stack" }));
+  });
+
   it("fails stack creation for unsupported resource types", async () => {
     await cfn.send(
       new CreateStackCommand({
         StackName: "contract-cfn-fail-stack",
         TemplateBody: JSON.stringify({
           Resources: {
-            Bucket: {
-              Type: "AWS::S3::Bucket",
+            Table: {
+              Type: "AWS::DynamoDB::Table",
               Properties: {
-                BucketName: "contract-cfn-fail",
+                TableName: "contract-cfn-fail",
               },
             },
           },

@@ -3,6 +3,7 @@ import { createCloudFormationBackend, createCloudFormationRouteHandler } from ".
 import { createCloudWatchLogsBackend, createCloudWatchLogsRouteHandler } from "./services/cloudwatch-logs/index.js";
 import { createLambdaBackend, createLambdaRouteHandler } from "./services/lambda/index.js";
 import { createMicrostackRouteHandler } from "./services/microstack/index.js";
+import { createS3Backend, createS3RouteHandler } from "./services/s3/index.js";
 import { HttpError } from "./http-error.js";
 
 export interface MicrostackServerOptions {
@@ -105,6 +106,7 @@ function sendError(res: ServerResponse, error: unknown): void {
 export async function createMicrostackServer(options: MicrostackServerOptions = {}): Promise<MicrostackServer> {
   const host = options.host ?? "127.0.0.1";
   const cloudWatchLogsBackend = createCloudWatchLogsBackend();
+  const s3Backend = createS3Backend();
   const lambdaBackend = createLambdaBackend({
     ...(options.dataDir ? { dataDir: options.dataDir } : {}),
     invocationLogger: (record) => {
@@ -126,9 +128,11 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
   const cloudFormationBackend = createCloudFormationBackend({
     lambdaBackend,
     cloudWatchLogsBackend,
+    s3Backend,
   });
   const handleMicrostackRoute = createMicrostackRouteHandler();
   const handleLambdaRoute = createLambdaRouteHandler(lambdaBackend);
+  const handleS3Route = createS3RouteHandler(s3Backend);
   const handleCloudFormationRoute = createCloudFormationRouteHandler(cloudFormationBackend);
   const handleCloudWatchLogsRoute = createCloudWatchLogsRouteHandler(cloudWatchLogsBackend);
 
@@ -153,6 +157,10 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
       }
 
       if (await handleLambdaRoute(req, res, pathname, method)) {
+        return;
+      }
+
+      if (await handleS3Route(req, res, pathname, method)) {
         return;
       }
 
