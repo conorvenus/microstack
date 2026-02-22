@@ -1,7 +1,7 @@
-import type * as React from "react";
+import type { HTMLAttributes, ReactElement } from "react";
 import { cn } from "@/lib/utils";
 
-function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactElement {
+function Skeleton({ className, ...props }: HTMLAttributes<HTMLDivElement>): ReactElement {
   return <div className={cn("animate-pulse rounded-md bg-muted", className)} {...props} />;
 }
 
