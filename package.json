@@ -1,0 +1,28 @@
+{
+  "name": "microstack",
+  "version": "0.1.0",
+  "description": "TypeScript library",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "if exist dist rmdir /s /q dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^25.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "@aws-sdk/client-lambda": "^3.995.0",
+    "adm-zip": "^0.5.16"
+  }
+}
