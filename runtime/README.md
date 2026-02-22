@@ -28,6 +28,14 @@ http://localhost:1337
 
 State is ephemeral by default. If consumers want persistence, they can mount a volume to `MICROSTACK_DATA_DIR`.
 
+## Endpoints
+
+Microstack reserves `/microstack/*` for non-AWS-emulation runtime endpoints.
+
+- `GET /microstack/health` -> `200 { "status": "ok" }`
+
+AWS Lambda emulation endpoints live under `/2015-03-31/*`.
+
 ## Example consumer docker-compose service
 
 ```yaml
@@ -47,3 +55,5 @@ Set your Lambda client endpoint to:
 ```text
 http://localhost:1337
 ```
+
+The runtime image `HEALTHCHECK` probes `GET /microstack/health`.
