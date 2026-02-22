@@ -2,11 +2,13 @@ import { motion } from "framer-motion";
 import { useMemo, type MutableRefObject, type ReactElement } from "react";
 
 import { CARDS_PER_ROW } from "../constants";
+import type { HealthState } from "../types";
 import { ServiceCard } from "./ServiceCard";
 import { SkeletonServiceCard } from "./SkeletonServiceCard";
 
 type ServiceGridProps = {
   visibleRows: number;
+  healthState: HealthState;
   gridRef: MutableRefObject<HTMLElement | null>;
   firstCardRef: MutableRefObject<HTMLDivElement | null>;
   loadMoreRef: MutableRefObject<HTMLDivElement | null>;
@@ -15,6 +17,7 @@ type ServiceGridProps = {
 
 export function ServiceGrid({
   visibleRows,
+  healthState,
   gridRef,
   firstCardRef,
   loadMoreRef,
@@ -41,7 +44,7 @@ export function ServiceGrid({
               viewport={{ once: true, amount: 0.2, root: scrollViewportRef }}
               transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1], delay: initialDelay }}
             >
-              {cardIndex === 0 ? <ServiceCard /> : <SkeletonServiceCard />}
+              {cardIndex === 0 ? <ServiceCard healthState={healthState} /> : <SkeletonServiceCard />}
             </motion.div>
           );
         })}
