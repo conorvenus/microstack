@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CloudFormationClient, CreateStackCommand, DeleteStackCommand } from "@aws-sdk/client-cloudformation";
+import { CloudFormationClient, CreateStackCommand, DeleteStackCommand, DescribeStacksCommand } from "@aws-sdk/client-cloudformation";
 import { CloudWatchLogsClient, DescribeLogStreamsCommand, GetLogEventsCommand } from "@aws-sdk/client-cloudwatch-logs";
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { InvokeCommand, LambdaClient } from "@aws-sdk/client-lambda";
 import { createMicrostackServer, type MicrostackServer } from "../../../src/index.js";
 
@@ -20,18 +21,21 @@ describe("cloudformation e2e smoke", () => {
   let cfn: CloudFormationClient;
   let lambda: LambdaClient;
   let logs: CloudWatchLogsClient;
+  let s3: S3Client;
 
   beforeAll(async () => {
     server = await createMicrostackServer({ port: 0 });
     cfn = new CloudFormationClient(createClientConfig(server.endpoint));
     lambda = new LambdaClient(createClientConfig(server.endpoint));
     logs = new CloudWatchLogsClient(createClientConfig(server.endpoint));
+    s3 = new S3Client({ ...createClientConfig(server.endpoint), forcePathStyle: true });
   });
 
   afterAll(async () => {
     cfn.destroy();
     lambda.destroy();
     logs.destroy();
+    s3.destroy();
     await server.close();
   });
 
@@ -92,5 +96,42 @@ describe("cloudformation e2e smoke", () => {
     expect(messages.some((message) => message.includes('"from":"cfn-e2e"'))).toBe(true);
 
     await cfn.send(new DeleteStackCommand({ StackName: "e2e-cfn-stack" }));
+  });
+
+  it("cloudformation delete fails on non-empty managed s3 bucket", async () => {
+    await cfn.send(
+      new CreateStackCommand({
+        StackName: "e2e-cfn-s3-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Bucket: {
+              Type: "AWS::S3::Bucket",
+              Properties: {
+                BucketName: "e2e-cfn-s3-bucket",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: "e2e-cfn-s3-bucket",
+        Key: "data.txt",
+        Body: "hello",
+      }),
+    );
+
+    await cfn.send(new DeleteStackCommand({ StackName: "e2e-cfn-s3-stack" }));
+
+    const failed = await cfn.send(new DescribeStacksCommand({ StackName: "e2e-cfn-s3-stack" }));
+    expect(failed.Stacks?.[0]?.StackStatus).toBe("DELETE_FAILED");
+
+    await s3.send(new DeleteObjectCommand({ Bucket: "e2e-cfn-s3-bucket", Key: "data.txt" }));
+    await cfn.send(new DeleteStackCommand({ StackName: "e2e-cfn-s3-stack" }));
+
+    const deleted = await cfn.send(new DescribeStacksCommand({ StackName: "e2e-cfn-s3-stack" }));
+    expect(deleted.Stacks?.[0]?.StackStatus).toBe("DELETE_COMPLETE");
   });
 });

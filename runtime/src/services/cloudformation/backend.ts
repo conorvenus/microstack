@@ -4,6 +4,7 @@ import { load as parseYaml } from "js-yaml";
 import { HttpError } from "../../http-error.js";
 import type { CloudWatchLogsBackend } from "../cloudwatch-logs/types.js";
 import type { CreateFunctionInput, LambdaBackend } from "../lambda/types.js";
+import type { S3Backend } from "../s3/types.js";
 import type {
   CloudFormationBackend,
   CloudFormationBackendDependencies,
@@ -65,15 +66,18 @@ const LAMBDA_ALLOWED_PROPERTIES = new Set([
   "Environment",
 ]);
 const LOG_GROUP_ALLOWED_PROPERTIES = new Set(["LogGroupName", "RetentionInDays"]);
+const S3_BUCKET_ALLOWED_PROPERTIES = new Set(["BucketName"]);
 
 class InMemoryCloudFormationBackend implements CloudFormationBackend {
   private readonly lambdaBackend: LambdaBackend;
   private readonly cloudWatchLogsBackend: CloudWatchLogsBackend;
+  private readonly s3Backend: S3Backend;
   private readonly stacksByName = new Map<string, StackRecord>();
 
   public constructor(deps: CloudFormationBackendDependencies) {
     this.lambdaBackend = deps.lambdaBackend;
     this.cloudWatchLogsBackend = deps.cloudWatchLogsBackend;
+    this.s3Backend = deps.s3Backend;
   }
 
   public async createStack(input: CreateStackInput): Promise<StackSummary> {
@@ -326,6 +330,12 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
       return;
     }
 
+    if (resourceType === "AWS::S3::Bucket") {
+      this.validateAllowedProperties(logicalId, resourceType, properties, S3_BUCKET_ALLOWED_PROPERTIES);
+      this.requireStringProperty(properties, "BucketName", logicalId, resourceType);
+      return;
+    }
+
     // Unsupported types fail during create to reflect stack failure behavior.
   }
 
@@ -447,6 +457,13 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
       return functionName;
     }
 
+    if (resource.Type === "AWS::S3::Bucket") {
+      const resolvedProperties = this.resolveValue(resource.Properties ?? {}, stack) as JsonRecord;
+      const bucketName = this.requireStringValue(resolvedProperties.BucketName, "BucketName", logicalId);
+      this.s3Backend.createBucket(bucketName);
+      return bucketName;
+    }
+
     throw new Error(`Unsupported resource type: ${resource.Type}`);
   }
 
@@ -457,6 +474,10 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
     }
     if (resource.resourceType === "AWS::Logs::LogGroup") {
       this.cloudWatchLogsBackend.deleteLogGroup(resource.physicalResourceId);
+      return;
+    }
+    if (resource.resourceType === "AWS::S3::Bucket") {
+      this.s3Backend.deleteBucket(resource.physicalResourceId);
       return;
     }
   }
@@ -533,6 +554,9 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
     }
     if (resource.resourceType === "AWS::Logs::LogGroup") {
       return `arn:aws:logs:us-east-1:000000000000:log-group:${resource.physicalResourceId}`;
+    }
+    if (resource.resourceType === "AWS::S3::Bucket") {
+      return `arn:aws:s3:::${resource.physicalResourceId}`;
     }
     throw new CloudFormationValidationError(`Unsupported Fn::GetAtt target type: ${resource.resourceType}`);
   }
