@@ -6,8 +6,8 @@ on:
       - master
 
 jobs:
-  ci:
-    name: ci
+  build:
+    name: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
