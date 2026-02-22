@@ -5,6 +5,7 @@ export type {
   CloudFormationBackendDependencies,
   CreateStackInput,
   CreateStackOutput,
+  UpdateStackInput,
   StackEvent,
   StackResourceSummary,
   StackSummary,

@@ -12,13 +12,14 @@ function createBackend() {
   const s3 = createS3Backend();
   return {
     backend: createCloudFormationBackend({ lambdaBackend: lambda, cloudWatchLogsBackend: logs, s3Backend: s3 }),
+    lambda,
     s3,
   };
 }
 
 describe("cloudformation backend", () => {
   it("creates stack resources for lambda and logs, then describes stack state", async () => {
-    const { backend } = createBackend();
+    const { backend, lambda } = createBackend();
     const stack = await backend.createStack({
       stackName: "unit-stack",
       templateBody: JSON.stringify({
@@ -251,5 +252,73 @@ Resources:
     expect(stack.stackStatus).toBe("CREATE_COMPLETE");
     const resources = backend.describeStackResources("yaml-unit-stack");
     expect(resources.map((resource) => resource.resourceType)).toContain("AWS::Lambda::Function");
+  });
+
+  it("updates stack resources using new template", async () => {
+    const { backend } = createBackend();
+
+    await backend.createStack({
+      stackName: "update-stack",
+      templateBody: JSON.stringify({
+        Resources: {
+          Bucket: {
+            Type: "AWS::S3::Bucket",
+            Properties: {
+              BucketName: "update-stack-bucket-v1",
+            },
+          },
+        },
+      }),
+    });
+
+    const updated = await backend.updateStack({
+      stackName: "update-stack",
+      templateBody: JSON.stringify({
+        Resources: {
+          Bucket: {
+            Type: "AWS::S3::Bucket",
+            Properties: {
+              BucketName: "update-stack-bucket-v2",
+            },
+          },
+        },
+      }),
+    });
+
+    expect(updated.stackStatus).toBe("UPDATE_COMPLETE");
+    const resources = backend.describeStackResources("update-stack");
+    expect(resources[0]?.physicalResourceId).toBe("update-stack-bucket-v2");
+  });
+
+  it("delete stack ignores missing lambda resources", async () => {
+    const { backend, lambda } = createBackend();
+    await backend.createStack({
+      stackName: "delete-missing-fn-stack",
+      templateBody: JSON.stringify({
+        Resources: {
+          Fn: {
+            Type: "AWS::Lambda::Function",
+            Properties: {
+              FunctionName: "delete-missing-fn",
+              Runtime: "nodejs20.x",
+              Role: "arn:aws:iam::000000000000:role/lambda-role",
+              Handler: "index.handler",
+              Code: { ZipFile: INLINE_HANDLER },
+            },
+          },
+        },
+      }),
+    });
+
+    // External deletion, should not make stack deletion fail.
+    const resources = backend.describeStackResources("delete-missing-fn-stack");
+    const fn = resources.find((resource) => resource.resourceType === "AWS::Lambda::Function");
+    expect(fn?.physicalResourceId).toBe("delete-missing-fn");
+
+    lambda.deleteFunction("delete-missing-fn");
+    await backend.deleteStack("delete-missing-fn-stack");
+
+    const stack = backend.describeStacks("delete-missing-fn-stack")[0];
+    expect(stack?.stackStatus).toBe("DELETE_COMPLETE");
   });
 });

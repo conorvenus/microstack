@@ -11,6 +11,7 @@ import type {
   CloudFormationResourceStatus,
   CloudFormationStackStatus,
   CreateStackInput,
+  UpdateStackInput,
   StackEvent,
   StackResourceSummary,
   StackSummary,
@@ -173,6 +174,125 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
     return this.requireStack(stackName).templateBody;
   }
 
+  public async updateStack(input: UpdateStackInput): Promise<StackSummary> {
+    const stack = this.requireStack(input.stackName);
+    const currentTemplate = this.parseTemplate(stack.templateBody);
+    const nextTemplate = this.parseTemplate(input.templateBody);
+    this.validateTemplate(nextTemplate);
+    const nextOrder = this.computeCreationOrder(nextTemplate.Resources);
+
+    const previousTemplateBody = stack.templateBody;
+    const previousCreationOrder = [...stack.creationOrder];
+    const previousResources = stack.resources.map((resource) => ({ ...resource }));
+
+    stack.stackStatus = "UPDATE_IN_PROGRESS";
+    delete stack.stackStatusReason;
+    this.addStackEvent(stack, "UPDATE_IN_PROGRESS");
+
+    try {
+      await this.deleteResourcesByOrder(stack, [...previousCreationOrder].reverse(), true);
+      stack.resources = [];
+      stack.creationOrder = [];
+      stack.templateBody = input.templateBody;
+
+      for (const logicalResourceId of nextOrder) {
+        const templateResource = nextTemplate.Resources[logicalResourceId];
+        if (!templateResource) {
+          throw new CloudFormationValidationError(`Resource not found in template: ${logicalResourceId}`);
+        }
+        const timestamp = new Date().toISOString();
+        const placeholder: ResourceRecord = {
+          stackName: stack.stackName,
+          stackId: stack.stackId,
+          logicalResourceId,
+          physicalResourceId: logicalResourceId,
+          resourceType: templateResource.Type,
+          resourceStatus: "UPDATE_IN_PROGRESS",
+          timestamp,
+        };
+        stack.resources.push(placeholder);
+        this.addResourceEvent(stack, placeholder, "UPDATE_IN_PROGRESS");
+
+        try {
+          const physicalResourceId = await this.createResource(stack, logicalResourceId, templateResource);
+          const completeTime = new Date().toISOString();
+          placeholder.physicalResourceId = physicalResourceId;
+          placeholder.resourceStatus = "UPDATE_COMPLETE";
+          placeholder.timestamp = completeTime;
+          this.addResourceEvent(stack, placeholder, "UPDATE_COMPLETE");
+          stack.creationOrder.push(logicalResourceId);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "Unknown resource update failure";
+          const failedTime = new Date().toISOString();
+          placeholder.resourceStatus = "UPDATE_FAILED";
+          placeholder.resourceStatusReason = reason;
+          placeholder.timestamp = failedTime;
+          this.addResourceEvent(stack, placeholder, "UPDATE_FAILED", reason);
+          throw error;
+        }
+      }
+
+      stack.stackStatus = "UPDATE_COMPLETE";
+      delete stack.stackStatusReason;
+      this.addStackEvent(stack, "UPDATE_COMPLETE");
+      return this.toStackSummary(stack);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Unknown stack update failure";
+      stack.stackStatus = "UPDATE_FAILED";
+      stack.stackStatusReason = reason;
+      this.addStackEvent(stack, "UPDATE_FAILED", reason);
+
+      stack.stackStatus = "UPDATE_ROLLBACK_IN_PROGRESS";
+      this.addStackEvent(stack, "UPDATE_ROLLBACK_IN_PROGRESS", reason);
+
+      try {
+        await this.deleteResourcesByOrder(stack, [...stack.creationOrder].reverse(), true);
+        stack.templateBody = previousTemplateBody;
+        stack.resources = previousResources.map((resource) => ({ ...resource, resourceStatus: "CREATE_IN_PROGRESS" }));
+        stack.creationOrder = [];
+        const previousTemplate = currentTemplate;
+        const previousOrder = this.computeCreationOrder(previousTemplate.Resources);
+        stack.resources = [];
+
+        for (const logicalResourceId of previousOrder) {
+          const templateResource = previousTemplate.Resources[logicalResourceId];
+          if (!templateResource) {
+            throw new CloudFormationValidationError(`Resource not found in template: ${logicalResourceId}`);
+          }
+          const placeholder: ResourceRecord = {
+            stackName: stack.stackName,
+            stackId: stack.stackId,
+            logicalResourceId,
+            physicalResourceId: logicalResourceId,
+            resourceType: templateResource.Type,
+            resourceStatus: "CREATE_IN_PROGRESS",
+            timestamp: new Date().toISOString(),
+          };
+          stack.resources.push(placeholder);
+          this.addResourceEvent(stack, placeholder, "CREATE_IN_PROGRESS");
+
+          const physicalResourceId = await this.createResource(stack, logicalResourceId, templateResource);
+          placeholder.physicalResourceId = physicalResourceId;
+          placeholder.resourceStatus = "CREATE_COMPLETE";
+          placeholder.timestamp = new Date().toISOString();
+          this.addResourceEvent(stack, placeholder, "CREATE_COMPLETE");
+          stack.creationOrder.push(logicalResourceId);
+        }
+
+        stack.stackStatus = "UPDATE_ROLLBACK_COMPLETE";
+        delete stack.stackStatusReason;
+        this.addStackEvent(stack, "UPDATE_ROLLBACK_COMPLETE");
+      } catch (rollbackError) {
+        const rollbackReason = rollbackError instanceof Error ? rollbackError.message : "Unknown rollback failure";
+        stack.stackStatus = "UPDATE_ROLLBACK_FAILED";
+        stack.stackStatusReason = rollbackReason;
+        this.addStackEvent(stack, "UPDATE_ROLLBACK_FAILED", rollbackReason);
+      }
+
+      return this.toStackSummary(stack);
+    }
+  }
+
   public async deleteStack(stackName: string): Promise<void> {
     const stack = this.requireStack(stackName);
     if (stack.stackStatus === "DELETE_COMPLETE") {
@@ -182,7 +302,25 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
     stack.stackStatus = "DELETE_IN_PROGRESS";
     this.addStackEvent(stack, "DELETE_IN_PROGRESS");
 
-    for (const logicalResourceId of [...stack.creationOrder].reverse()) {
+    const failedReason = await this.deleteResourcesByOrder(stack, [...stack.creationOrder].reverse(), false);
+    if (failedReason) {
+      stack.stackStatus = "DELETE_FAILED";
+      stack.stackStatusReason = failedReason;
+      this.addStackEvent(stack, "DELETE_FAILED", failedReason);
+      return;
+    }
+
+    stack.stackStatus = "DELETE_COMPLETE";
+    delete stack.stackStatusReason;
+    this.addStackEvent(stack, "DELETE_COMPLETE");
+  }
+
+  private async deleteResourcesByOrder(
+    stack: StackRecord,
+    logicalIds: string[],
+    suppressFailure: boolean,
+  ): Promise<string | undefined> {
+    for (const logicalResourceId of logicalIds) {
       const resource = stack.resources.find((item) => item.logicalResourceId === logicalResourceId);
       if (!resource) {
         continue;
@@ -196,25 +334,52 @@ class InMemoryCloudFormationBackend implements CloudFormationBackend {
         await this.deleteResource(resource);
         const completeTime = new Date().toISOString();
         resource.resourceStatus = "DELETE_COMPLETE";
+        delete resource.resourceStatusReason;
         resource.timestamp = completeTime;
         this.addResourceEvent(stack, resource, "DELETE_COMPLETE");
       } catch (error) {
+        if (this.isIgnorableDeleteError(resource.resourceType, error)) {
+          const completeTime = new Date().toISOString();
+          resource.resourceStatus = "DELETE_COMPLETE";
+          delete resource.resourceStatusReason;
+          resource.timestamp = completeTime;
+          this.addResourceEvent(stack, resource, "DELETE_COMPLETE");
+          continue;
+        }
+
         const reason = error instanceof Error ? error.message : "Unknown resource deletion failure";
         const failedTime = new Date().toISOString();
         resource.resourceStatus = "DELETE_FAILED";
         resource.resourceStatusReason = reason;
         resource.timestamp = failedTime;
         this.addResourceEvent(stack, resource, "DELETE_FAILED", reason);
-        stack.stackStatus = "DELETE_FAILED";
-        stack.stackStatusReason = reason;
-        this.addStackEvent(stack, "DELETE_FAILED", reason);
-        return;
+        if (suppressFailure) {
+          return reason;
+        }
+        return reason;
       }
     }
+    return undefined;
+  }
 
-    stack.stackStatus = "DELETE_COMPLETE";
-    delete stack.stackStatusReason;
-    this.addStackEvent(stack, "DELETE_COMPLETE");
+  private isIgnorableDeleteError(resourceType: string, error: unknown): boolean {
+    const code =
+      typeof error === "object" && error !== null && "code" in error && typeof (error as { code?: unknown }).code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+    if (!code) {
+      return false;
+    }
+    if (resourceType === "AWS::Lambda::Function" && code === "ResourceNotFoundException") {
+      return true;
+    }
+    if (resourceType === "AWS::Logs::LogGroup" && code === "ResourceNotFoundException") {
+      return true;
+    }
+    if (resourceType === "AWS::S3::Bucket" && code === "NoSuchBucket") {
+      return true;
+    }
+    return false;
   }
 
   private toStackSummary(stack: StackRecord): StackSummary {

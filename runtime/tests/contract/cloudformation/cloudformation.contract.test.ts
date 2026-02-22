@@ -7,9 +7,10 @@ import {
   DescribeStackResourcesCommand,
   DescribeStacksCommand,
   GetTemplateCommand,
+  UpdateStackCommand,
 } from "@aws-sdk/client-cloudformation";
 import { CloudWatchLogsClient, DescribeLogGroupsCommand } from "@aws-sdk/client-cloudwatch-logs";
-import { LambdaClient, GetFunctionCommand } from "@aws-sdk/client-lambda";
+import { InvokeCommand, LambdaClient, DeleteFunctionCommand, GetFunctionCommand } from "@aws-sdk/client-lambda";
 import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import { createMicrostackServer, type MicrostackServer } from "../../../src/index.js";
 
@@ -22,6 +23,14 @@ function createClientConfig(endpoint: string) {
       secretAccessKey: "test",
     },
   };
+}
+
+function decodePayload(payload?: Uint8Array): unknown {
+  if (!payload) {
+    return undefined;
+  }
+  const raw = Buffer.from(payload).toString("utf8");
+  return raw.length > 0 ? JSON.parse(raw) : undefined;
 }
 
 describe("CloudFormation contract (AWS SDK)", () => {
@@ -184,5 +193,90 @@ Resources:
 
     const stacks = await cfn.send(new DescribeStacksCommand({ StackName: "contract-cfn-yaml-stack" }));
     expect(stacks.Stacks?.[0]?.StackStatus).toBe("CREATE_COMPLETE");
+  });
+
+  it("updates stack template and updates lambda behavior", async () => {
+    await cfn.send(
+      new CreateStackCommand({
+        StackName: "contract-cfn-update-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Fn: {
+              Type: "AWS::Lambda::Function",
+              Properties: {
+                FunctionName: "contract-cfn-update-fn",
+                Runtime: "nodejs20.x",
+                Role: "arn:aws:iam::000000000000:role/lambda-role",
+                Handler: "index.handler",
+                Code: {
+                  ZipFile: "export async function handler(){return {version:1};}",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const firstInvoke = await lambda.send(new InvokeCommand({ FunctionName: "contract-cfn-update-fn" }));
+    expect(decodePayload(firstInvoke.Payload)).toEqual({ version: 1 });
+
+    await cfn.send(
+      new UpdateStackCommand({
+        StackName: "contract-cfn-update-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Fn: {
+              Type: "AWS::Lambda::Function",
+              Properties: {
+                FunctionName: "contract-cfn-update-fn",
+                Runtime: "nodejs20.x",
+                Role: "arn:aws:iam::000000000000:role/lambda-role",
+                Handler: "index.handler",
+                Code: {
+                  ZipFile: "export async function handler(){return {version:2};}",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    const stacks = await cfn.send(new DescribeStacksCommand({ StackName: "contract-cfn-update-stack" }));
+    expect(stacks.Stacks?.[0]?.StackStatus).toBe("UPDATE_COMPLETE");
+
+    const secondInvoke = await lambda.send(new InvokeCommand({ FunctionName: "contract-cfn-update-fn" }));
+    expect(decodePayload(secondInvoke.Payload)).toEqual({ version: 2 });
+  });
+
+  it("deletes stack successfully even when function was removed outside cloudformation", async () => {
+    await cfn.send(
+      new CreateStackCommand({
+        StackName: "contract-cfn-delete-missing-fn-stack",
+        TemplateBody: JSON.stringify({
+          Resources: {
+            Fn: {
+              Type: "AWS::Lambda::Function",
+              Properties: {
+                FunctionName: "contract-delete-missing-fn",
+                Runtime: "nodejs20.x",
+                Role: "arn:aws:iam::000000000000:role/lambda-role",
+                Handler: "index.handler",
+                Code: {
+                  ZipFile: "export async function handler(){return {ok:true};}",
+                },
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    await lambda.send(new DeleteFunctionCommand({ FunctionName: "contract-delete-missing-fn" }));
+    await cfn.send(new DeleteStackCommand({ StackName: "contract-cfn-delete-missing-fn-stack" }));
+
+    const stacks = await cfn.send(new DescribeStacksCommand({ StackName: "contract-cfn-delete-missing-fn-stack" }));
+    expect(stacks.Stacks?.[0]?.StackStatus).toBe("DELETE_COMPLETE");
   });
 });
