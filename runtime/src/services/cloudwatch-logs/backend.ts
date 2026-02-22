@@ -19,6 +19,20 @@ type LogGroupState = {
 class InMemoryCloudWatchLogsBackend implements CloudWatchLogsBackend {
   private readonly groups = new Map<string, LogGroupState>();
 
+  public createLogGroup(logGroupName: string, retentionInDays?: number): void {
+    if (this.groups.has(logGroupName)) {
+      throw new HttpError(400, "ResourceAlreadyExistsException", `The specified log group already exists: ${logGroupName}`);
+    }
+    this.getOrCreateGroup(logGroupName, Date.now(), retentionInDays);
+  }
+
+  public deleteLogGroup(logGroupName: string): void {
+    if (!this.groups.has(logGroupName)) {
+      throw new HttpError(400, "ResourceNotFoundException", `The specified log group does not exist: ${logGroupName}`);
+    }
+    this.groups.delete(logGroupName);
+  }
+
   public putLogEvent(logGroupName: string, logStreamName: string, message: string, timestamp?: number): void {
     const eventTime = timestamp ?? Date.now();
     const group = this.getOrCreateGroup(logGroupName, eventTime);
@@ -69,7 +83,7 @@ class InMemoryCloudWatchLogsBackend implements CloudWatchLogsBackend {
     return [...stream.events].sort((left, right) => left.timestamp - right.timestamp);
   }
 
-  private getOrCreateGroup(logGroupName: string, creationTime: number): LogGroupState {
+  private getOrCreateGroup(logGroupName: string, creationTime: number, retentionInDays?: number): LogGroupState {
     const existing = this.groups.get(logGroupName);
     if (existing) {
       return existing;
@@ -81,6 +95,7 @@ class InMemoryCloudWatchLogsBackend implements CloudWatchLogsBackend {
         creationTime,
         arn: `arn:aws:logs:us-east-1:000000000000:log-group:${logGroupName}`,
         storedBytes: 0,
+        ...(retentionInDays ? { retentionInDays } : {}),
       },
       streams: new Map<string, LogStreamState>(),
     };

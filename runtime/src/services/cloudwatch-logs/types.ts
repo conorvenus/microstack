@@ -3,6 +3,7 @@ export type CloudWatchLogGroup = {
   creationTime: number;
   arn: string;
   storedBytes: number;
+  retentionInDays?: number;
 };
 
 export type CloudWatchLogStream = {
@@ -20,6 +21,8 @@ export type CloudWatchLogEvent = {
 };
 
 export interface CloudWatchLogsBackend {
+  createLogGroup(logGroupName: string, retentionInDays?: number): void;
+  deleteLogGroup(logGroupName: string): void;
   putLogEvent(logGroupName: string, logStreamName: string, message: string, timestamp?: number): void;
   describeLogGroups(logGroupNamePrefix?: string): CloudWatchLogGroup[];
   describeLogStreams(logGroupName: string, logStreamNamePrefix?: string): CloudWatchLogStream[];

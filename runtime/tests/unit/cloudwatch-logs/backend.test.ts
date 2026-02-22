@@ -19,4 +19,15 @@ describe("cloudwatch logs backend", () => {
     const events = backend.getLogEvents(groupName, streamName);
     expect(events.map((event) => event.message)).toEqual(["first", "later"]);
   });
+
+  it("supports explicit create and delete log group operations", () => {
+    const backend = createCloudWatchLogsBackend();
+    const groupName = "/aws/lambda/managed-group";
+
+    backend.createLogGroup(groupName, 14);
+    expect(backend.describeLogGroups(groupName).map((group) => group.logGroupName)).toContain(groupName);
+
+    backend.deleteLogGroup(groupName);
+    expect(backend.describeLogGroups(groupName)).toHaveLength(0);
+  });
 });

@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createCloudFormationBackend, createCloudFormationRouteHandler } from "./services/cloudformation/index.js";
 import { createCloudWatchLogsBackend, createCloudWatchLogsRouteHandler } from "./services/cloudwatch-logs/index.js";
 import { createLambdaBackend, createLambdaRouteHandler } from "./services/lambda/index.js";
 import { createMicrostackRouteHandler } from "./services/microstack/index.js";
@@ -122,8 +123,13 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
       cloudWatchLogsBackend.putLogEvent(logGroupName, logStreamName, `END RequestId: ${record.requestId}`, record.timestamp + 2);
     },
   });
+  const cloudFormationBackend = createCloudFormationBackend({
+    lambdaBackend,
+    cloudWatchLogsBackend,
+  });
   const handleMicrostackRoute = createMicrostackRouteHandler();
   const handleLambdaRoute = createLambdaRouteHandler(lambdaBackend);
+  const handleCloudFormationRoute = createCloudFormationRouteHandler(cloudFormationBackend);
   const handleCloudWatchLogsRoute = createCloudWatchLogsRouteHandler(cloudWatchLogsBackend);
 
   const server: Server = createServer(async (req, res) => {
@@ -147,6 +153,10 @@ export async function createMicrostackServer(options: MicrostackServerOptions = 
       }
 
       if (await handleLambdaRoute(req, res, pathname, method)) {
+        return;
+      }
+
+      if (await handleCloudFormationRoute(req, res, pathname, method)) {
         return;
       }
 
