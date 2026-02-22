@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import {
   DEFAULT_RUNTIME,
-  HEALTH_PATH,
   POLL_INTERVAL_MS,
-  REQUEST_TIMEOUT_MS,
   STORAGE_KEY,
 } from "../constants";
 import type { HealthState } from "../types";
 import { normalizeRuntimeUrl } from "../utils";
+import { getRuntimeHealth } from "@/features/runtime/api";
 
 type RuntimeHealthState = {
   inputValue: string;
@@ -44,59 +44,32 @@ export function useRuntimeHealth(): RuntimeHealthState {
     window.localStorage.setItem(STORAGE_KEY, normalized);
   }, [inputValue]);
 
+  const healthQuery = useQuery({
+    queryKey: ["runtime-health", runtimeOrigin],
+    queryFn: ({ signal }) => {
+      if (!runtimeOrigin) {
+        throw new Error("Missing runtime origin");
+      }
+      return getRuntimeHealth(runtimeOrigin, signal);
+    },
+    enabled: runtimeOrigin !== null,
+    refetchInterval: POLL_INTERVAL_MS,
+  });
+
   useEffect(() => {
     if (!runtimeOrigin) {
       setHealthState("invalid");
+      setLastCheckedAt(null);
       return;
     }
 
-    let cancelled = false;
+    if (!healthQuery.data) {
+      return;
+    }
 
-    const check = async (): Promise<void> => {
-      if (!runtimeOrigin) {
-        return;
-      }
-
-      const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => {
-        controller.abort();
-      }, REQUEST_TIMEOUT_MS);
-
-      try {
-        const response = await fetch(`${runtimeOrigin}${HEALTH_PATH}`, {
-          method: "GET",
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          throw new Error("Health endpoint returned non-OK");
-        }
-
-        const payload = (await response.json()) as { status?: string };
-        if (!cancelled) {
-          setHealthState(payload.status === "ok" ? "healthy" : "unreachable");
-          setLastCheckedAt(new Date());
-        }
-      } catch {
-        if (!cancelled) {
-          setHealthState("unreachable");
-          setLastCheckedAt(new Date());
-        }
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    };
-
-    void check();
-    const intervalId = window.setInterval(() => {
-      void check();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(intervalId);
-    };
-  }, [runtimeOrigin]);
+    setHealthState(healthQuery.data.healthState);
+    setLastCheckedAt(healthQuery.data.checkedAt);
+  }, [healthQuery.data, runtimeOrigin]);
 
   return {
     inputValue,

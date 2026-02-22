@@ -30,7 +30,7 @@ export function RuntimeConnectionCard({
     <Card className="border-slate-800/80 bg-slate-900/80 backdrop-blur-sm">
       <CardHeader>
         <CardTitle className="text-slate-100">Runtime Connection</CardTitle>
-        <CardDescription>Configure the runtime endpoint for health checks.</CardDescription>
+        <CardDescription>Configure the runtime endpoint used across MicroStack services and management views.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="relative">
@@ -48,7 +48,7 @@ export function RuntimeConnectionCard({
             }}
             className="h-11 border-slate-700/80 bg-slate-950/80 pl-10 text-slate-100 placeholder:text-slate-500"
             placeholder="127.0.0.1:1337"
-            aria-label="Microstack runtime URL"
+            aria-label="MicroStack runtime URL"
           />
         </div>
 
